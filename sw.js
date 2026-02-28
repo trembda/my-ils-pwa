@@ -4,7 +4,7 @@
    Cache name versionné → mise à jour propre lors des déploiements
    ============================================================ */
 
-const CACHE_NAME = "ils-piste-v1";
+const CACHE_NAME = "ils-piste-v2";
 
 // Ressources à pré-cacher à l'installation
 const PRECACHE_URLS = [
