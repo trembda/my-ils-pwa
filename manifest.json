@@ -1,0 +1,1247 @@
+
+<!-- ============================================================
+     LECTURE DE PISTE (ILS) - OUTIL EDUCATIF (offline)
+     ------------------------------------------------------------
+     Entrees:
+       - 90 Hz (normal), 150 Hz (normal)
+       - CL_PM (lecture vehicule / PIR)
+       - CL_FC (reference / baseline)
+     Calculs:
+       - Δ = CL_PM - CL_FC
+       - Correction appliquee aux 90/150 = -Δ
+       - 90_corrige  = 90_normal  - Δ
+       - 150_corrige = 150_normal - Δ
+     Visuels:
+       - Repere CL (zoom autour de 0) + fleche REF -> VEH + valeur Δ
+       - Repere 90/150 avec loupe sur [-75..-55] et [+55..+75]
+     Robustesse encodage:
+       - JS utilise des escapes Unicode (\u00B5 pour µ, \u0394 pour Δ).
+     ============================================================ -->
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+<meta name="theme-color" content="#0b1220" />
+<title>Lecture de piste — Correction 90/150</title>
+
+<!-- ── PWA ──────────────────────────────── -->
+<link rel="manifest" href="manifest.json" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="ILS Correction" />
+<link rel="apple-touch-icon" href="icons/icon-192.png" />
+<!-- ─────────────────────────────────────── -->
+<style>
+  /* =========================
+     THÈME : Crème / Vert forêt / Scientifique
+     ========================= */
+  :root{
+    /* Palette principale */
+    --bg:       #f5f0e8;        /* crème ivoire */
+    --bg2:      #ede8de;        /* crème légèrement plus foncé */
+    --card:     #ffffff;        /* blanc pur pour les cartes */
+    --card2:    #f0ece2;        /* crème intérieur panneau */
+    --border:   #c8bfa8;        /* bordure sable */
+    --border2:  #b5aa90;        /* bordure plus marquée */
+
+    --text:     #1a2218;        /* quasi-noir verdâtre */
+    --muted:    #5a6b54;        /* vert sauge foncé */
+
+    /* Accents */
+    --accent:   #2d5a27;        /* vert forêt principal */
+    --accent2:  #4a7c42;        /* vert forêt clair */
+    --accent-bg:rgba(45,90,39,.08);
+
+    /* Points SVG */
+    --pm:       #c0392b;        /* rouge brique — point PM */
+    --fc:       #2d5a27;        /* vert forêt — point FC */
+    --n:        #7f8c8d;        /* gris ardoise — normal */
+    --c:        #c0392b;        /* rouge brique — corrigé */
+
+    --r: 10px;                  /* coins moins arrondis = look plus technique */
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    font-family: "Georgia", "Times New Roman", ui-serif, serif;
+    color:var(--text);
+    background: var(--bg);
+    /* subtile texture grain papier */
+    background-image:
+      repeating-linear-gradient(0deg, transparent, transparent 28px, rgba(180,165,130,.06) 28px, rgba(180,165,130,.06) 29px),
+      repeating-linear-gradient(90deg, transparent, transparent 28px, rgba(180,165,130,.04) 28px, rgba(180,165,130,.04) 29px);
+  }
+
+  .wrap{
+    max-width:920px;
+    margin:0 auto;
+    padding:16px;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+    text-align:center;
+  }
+
+  h1{
+    margin:0 0 4px;
+    font-size:22px;
+    font-weight:700;
+    letter-spacing:.3px;
+    color:var(--accent);
+    font-family: "Georgia", ui-serif, serif;
+  }
+  h2{
+    margin:16px 0 8px;
+    font-size:15px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:1.2px;
+    color:var(--muted);
+    font-family: system-ui, sans-serif;
+  }
+
+  /* Carte principale */
+  .card{
+    background:var(--card);
+    border:1.5px solid var(--border2);
+    border-radius:var(--r);
+    padding:14px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.06);
+  }
+
+  .grid{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:10px;
+    justify-items:center;
+  }
+  @media (min-width:820px){
+    .grid{grid-template-columns:1fr 1fr;}
+  }
+
+  /* Panneaux intérieurs — style "encart de tableau" */
+  .panel{
+    width:100%;
+    background:var(--card2);
+    border:1px solid var(--border);
+    border-radius:6px;
+    padding:12px;
+    text-align:center;
+  }
+
+  .row{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:10px;
+    justify-items:center;
+  }
+  @media (max-width:420px){
+    .row{grid-template-columns:1fr;}
+  }
+
+  .field{
+    width:100%;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+  }
+
+  label{
+    display:block;
+    color:var(--muted);
+    font-weight:700;
+    font-size:12px;
+    text-transform:uppercase;
+    letter-spacing:.8px;
+    margin:0 0 6px;
+    font-family: system-ui, sans-serif;
+  }
+
+  input{
+    width:min(190px, 100%);
+    padding:10px 10px;
+    border-radius:6px;
+    border:1.5px solid var(--border2);
+    background:#fff;
+    color:var(--text);
+    font-size:20px;
+    font-weight:700;
+    outline:none;
+    text-align:center;
+    font-family: "Georgia", ui-serif, serif;
+  }
+  input:focus{
+    border-color: var(--accent2);
+    box-shadow: 0 0 0 3px rgba(74,124,66,.18);
+  }
+  input[readonly]{
+    background: #f8f6f0;
+    border-style:dashed;
+    border-color: var(--accent2);
+    color: var(--accent);
+  }
+
+  .help{
+    margin-top:8px;
+    color:var(--muted);
+    font-size:12px;
+    line-height:1.4;
+    font-style:italic;
+    font-family: system-ui, sans-serif;
+  }
+
+  /* Import button */
+  .importRow{
+    display:flex;
+    justify-content:flex-end;
+    margin-bottom:10px;
+  }
+  @media (max-width:600px){
+    .importRow{
+      order:99;
+      margin-top:12px;
+      margin-bottom:0;
+    }
+    .importRow button{
+      width:100%;
+      padding:13px;
+      font-size:15px;
+      border-radius:8px;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+    }
+  }
+
+  .btns{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    margin-top:10px;
+    justify-content:center;
+  }
+  button{
+    border:1.5px solid var(--border2);
+    background:#fff;
+    color:var(--text);
+    border-radius:6px;
+    padding:10px 14px;
+    font-weight:700;
+    cursor:pointer;
+    font-size:14px;
+    font-family: system-ui, sans-serif;
+    transition: background .15s, border-color .15s;
+  }
+  button:hover{ background:var(--card2); }
+  button.primary{
+    background: var(--accent);
+    border-color: var(--accent);
+    color:#fff;
+  }
+  button.primary:hover{ background: var(--accent2); }
+
+  .kpi{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:10px;
+    justify-items:center;
+  }
+  @media (min-width:820px){
+    .kpi{grid-template-columns:1fr 1fr;}
+  }
+
+  /* Pill ΔCL */
+  .pill{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    gap:10px;
+    padding:10px 14px;
+    border-radius:6px;
+    border:1.5px solid var(--accent2);
+    background: var(--accent-bg);
+    font-weight:700;
+    width:100%;
+    font-family: system-ui, sans-serif;
+  }
+
+  .deltaPill{
+    margin-top:12px;
+    justify-content:center;
+    gap:6px;
+    white-space:normal;
+    flex-wrap:wrap;
+    text-align:center;
+    font-size:14px;
+  }
+  @media (min-width:860px){
+    .deltaPill{
+      max-width:560px;
+      margin-left:auto;
+      margin-right:auto;
+      white-space:nowrap;
+      font-size:inherit;
+    }
+  }
+
+  .mono{
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Roboto Mono", monospace;
+  }
+
+  .note{
+    margin-top:10px;
+    color:var(--text);
+    font-size:13px;
+    line-height:1.5;
+    font-weight:400;
+    border-top:1px solid var(--border);
+    padding-top:10px;
+    white-space:pre-wrap;
+    text-align:left;
+    font-family: ui-monospace, Consolas, monospace;
+  }
+
+  /* Cartes visuelles SVG */
+  .vizCard{
+    background:var(--card2);
+    border:1.5px solid var(--border2);
+    border-radius:6px;
+    padding:14px;
+    text-align:center;
+  }
+  /* Ligne de séparation haut de carte visuelle */
+  .vizCard::before{
+    content:'';
+    display:block;
+    height:3px;
+    background: linear-gradient(90deg, var(--accent), var(--accent2), transparent);
+    border-radius:2px;
+    margin-bottom:12px;
+  }
+  .vizTitle{
+    font-weight:700;
+    margin:0 0 8px;
+    font-size:16px;
+    text-transform:uppercase;
+    letter-spacing:1px;
+    color:var(--accent);
+    font-family: system-ui, sans-serif;
+  }
+
+  svg{width:100%;height:auto;display:block;touch-action:pan-y;margin:0 auto;}
+
+  .legend{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-top:10px;
+    color:var(--muted);
+    font-size:13px;
+    font-weight:600;
+    justify-content:center;
+    font-family: system-ui, sans-serif;
+  }
+  .legItem{display:flex;align-items:center;gap:6px}
+  .sw{width:14px;height:14px;border-radius:3px;box-shadow:0 1px 3px rgba(0,0,0,.15)}
+
+  /* Modal */
+  .modalBack{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;padding:14px;z-index:50;}
+  .modal{width:min(740px,100%);background:#fff;border:1.5px solid var(--border2);border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.2);padding:16px;text-align:left;}
+  .modalHead{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:10px;}
+  .modalHead h3{margin:0;font-size:16px;color:var(--accent);font-family:"Georgia",serif;}
+  textarea{width:100%;min-height:140px;border-radius:6px;border:1.5px solid var(--border2);background:#fafaf8;color:var(--text);padding:12px;font-size:14px;outline:none;resize:vertical;font-family:ui-monospace,monospace;}
+  textarea:focus{border-color:var(--accent2);box-shadow:0 0 0 3px rgba(74,124,66,.15);}
+  .modalHelp{color:var(--muted);font-size:12px;line-height:1.4;margin-top:8px;font-style:italic;}
+
+  .cardInner{display:flex;flex-direction:column;}
+
+  .inputUnit{
+    display:flex;
+    align-items:center;
+    gap:6px;
+    width:min(190px,100%);
+  }
+  .inputUnit input{width:100%;flex:1;min-width:0;}
+  .unit{
+    color:var(--muted);
+    font-size:13px;
+    font-weight:700;
+    white-space:nowrap;
+    flex-shrink:0;
+    font-family:system-ui,sans-serif;
+  }
+
+  .row3{grid-template-columns:1fr 1fr 1fr;}
+  @media (max-width:500px){.row3{grid-template-columns:1fr;}}
+</style>
+</head>
+
+<body>
+<!-- =========================
+     SECTION HTML (UI)
+     - Header / description
+     - Cartes d'entrees
+     - Resultats (calculs)
+     - Interpretation visuelle (SVG)
+     - Modal Importer
+     ========================= -->
+<div class="wrap">
+  <h1>Lectures de piste</h1>
+  <h2>Largeur corrigée</h2>
+  <div class="card">
+    <div class="cardInner">
+      <!-- Import button: top-right on desktop, full-width at bottom on mobile (order:99) -->
+      <div class="importRow">
+        	<button class="primary" id="btnImporter">
+          <span></span> Importer
+        </button>
+      </div>
+
+      <div class="grid">
+        <!-- Lectures PM : 90 Hz, 150 Hz et CL_PM vont ensemble -->
+        <div class="panel">
+          <div class="row row3">
+            <div class="field">
+              <label>90 Hz</label>
+              <div class="inputUnit">
+                <input id="v90n" inputmode="decimal" value="-70.0" />
+                <span class="unit">&micro;A</span>
+              </div>
+            </div>
+            <div class="field">
+              <label>150 Hz</label>
+              <div class="inputUnit">
+                <input id="v150n" inputmode="decimal" value="70.0" />
+                <span class="unit">&micro;A</span>
+              </div>
+            </div>
+            <div class="field">
+              <label>CL</label>
+              <div class="inputUnit">
+                <input id="clPm" inputmode="decimal" value="-3.0" />
+                <span class="unit">&micro;A</span>
+              </div>
+            </div>
+          </div>
+          <div class="help">DDM mesurée lors du préventif</div>
+        </div>
+
+        <!-- CL_FC seul -->
+        <div class="panel">
+          <div class="field">
+            <label>CL</label>
+            <div class="inputUnit">
+              <input id="clFc" inputmode="decimal" value="2.0" />
+              <span class="unit">&micro;A</span>
+            </div>
+          </div>
+          <div class="help">DMM au flight check (Annexe A-4)</div>
+        </div>
+      </div>
+
+      <div class="pill deltaPill">
+        <span>&Delta;CL = CL DDM (now) - CL DDM (FC) = </span>
+        <span id="outDelta" class="mono">--</span>
+      </div>
+<h1> </h1>
+<h1> </h1>
+      <h1>Résultats</h1>
+      <div class="kpi">
+        <div class="panel">
+          <div class="row">
+            <div class="field">
+              <label>90 Hz corrigé</label>
+              <div class="inputUnit">
+                <input id="v90c" readonly />
+                <span class="unit">&micro;A</span>
+              </div>
+            </div>
+            <div class="field">
+              <label>150 Hz corrigé</label>
+              <div class="inputUnit">
+                <input id="v150c" readonly />
+                <span class="unit">&micro;A</span>
+              </div>
+            </div>
+          </div>
+          <div class="help">Valeur corrigée = DDM normale &minus; &Delta;</div>
+        </div>
+
+        <div class="panel">
+          <div id="sentence" class="help"></div>
+          <div id="eqs" class="note mono"></div>
+        </div>
+      </div>
+<h1> </h1>
+<h1> </h1>
+      <h1>Interprétation visuelle</h1>
+
+      <div class="vizCard">
+        <div class="vizTitle">CL</div>
+        <svg id="svgCL" viewBox="0 0 1000 310" preserveAspectRatio="xMidYMid meet" aria-label="Repere CL"></svg>
+        <div class="legend">
+          <div class="legItem"><span class="sw" style="background:var(--pm)"></span>CL DDM normal</div>
+          <div class="legItem"><span class="sw" style="background:var(--fc)"></span>CL DDM flight cal</div>
+        </div>
+      </div>
+
+      <div class="vizCard" style="margin-top:12px">
+        <div class="vizTitle">Valeurs corrigées 90/150</div>
+        <svg id="svgBig" viewBox="0 0 1000 340" preserveAspectRatio="xMidYMid meet" aria-label="Valeurs 90/150"></svg>
+        <div class="legend">
+          <div class="legItem"><span class="sw" style="background:var(--n)"></span>CL DDM normal</div>
+          <div class="legItem"><span class="sw" style="background:var(--c)"></span>CL DDM corrigée</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- =========================
+     MODAL: IMPORTER
+     - Colle un bloc texte (ex: 90=-70 150=70 pm=-3 fc=2)
+     - Parser tolerant (espaces, virgules, +/-)
+     - Applique aux champs puis recalcule/rafraichit les visuels
+     ========================= -->
+<!-- Modal Importer -->
+<div class="modalBack" id="modalBack" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="modal">
+    <div class="modalHead">
+      <h3 id="modalTitle">Importer des valeurs</h3>
+      <button id="closeModal">Fermer</button>
+    </div>
+    <textarea id="importText" placeholder="Colle ici..."></textarea>
+    <div class="btns" style="margin-top:10px;justify-content:flex-start">
+      <button class="primary" id="applyImport">Appliquer</button>
+      <button id="fillExample">Coller</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ============================================================
+   SECTION JS (LOGIQUE / CALCULS / VISUELS SVG)
+   1) Parsing + formatage (entrées utilisateur)
+   2) Calculs (Δ, correction, valeurs corrigees)
+   3) Mappings d'echelles (repere CL + loupe 90/150)
+   4) Rendu SVG (axes, graduations, points, labels, fleches)
+   5) Interaction (drag & drop) + Importer
+   NOTE: symboles en Unicode escape pour eviter les problemes d'encodage.
+   ============================================================ */
+
+const $ = (id)=>document.getElementById(id);
+
+// --- Symboles "safe" (independants de l'encodage du fichier)
+const MU    = "\u00B5";   // µ
+const DELTA = "\u0394";   // Δ
+
+const v90n  = $("v90n");
+const v150n = $("v150n");
+const clPm  = $("clPm");
+const clFc  = $("clFc");
+const v90c  = $("v90c");
+const v150c = $("v150c");
+const outDelta  = $("outDelta");
+const sentence  = $("sentence");
+const eqs       = $("eqs");
+const svgCL  = $("svgCL");
+const svgBig = $("svgBig");
+
+// -------- parsing / formatting --------
+// --- Parsing: accepte -, +, virgule, espaces, tirets typographiques
+function parseNum(v){
+  let s = String(v ?? "").trim()
+    .replace(/[–—]/g, "-")
+    .replace(/\s+/g, "")
+    .replace(",", ".");
+  if (s.startsWith("+")) s = s.slice(1);
+  if (s === "" || s === "-" || s === "." || s === "-.") return NaN;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : NaN;
+}
+function fmt1(n){
+  const r = Math.round(n*10)/10;
+  return r.toFixed(1);
+}
+function fmtSigned1(n){
+  return (n>0?"+":"") + fmt1(n);
+}
+function cleanField(el){
+  const n = parseNum(el.value);
+  if (Number.isFinite(n)) el.value = fmt1(n);
+}
+function formatIfNotEditing(el, n){
+  if (document.activeElement === el) return;
+  el.value = fmt1(n);
+}
+const clamp=(n,lo,hi)=>Math.max(lo,Math.min(hi,n));
+
+// -------- scales --------
+const CL_MIN=-5, CL_MAX=5;
+
+function mapCL(v){
+  const L=70, R=930;
+  v = clamp(v, CL_MIN, CL_MAX);
+  const t = (v - CL_MIN) / (CL_MAX - CL_MIN);
+  return L + t*(R-L);
+}
+function invMapCL(x){
+  const L=70, R=930;
+  x = clamp(x, L, R);
+  const t = (x - L) / (R-L);
+  return CL_MIN + t*(CL_MAX - CL_MIN);
+}
+
+const BIG_MIN=-75, BIG_MAX=75;
+const BIG_Z1A=-75, BIG_Z1B=-55;
+const BIG_Z2A= 55, BIG_Z2B= 75;
+const BIG_W1=0.40, BIG_W2=0.20, BIG_W3=0.40;
+
+function mapBig(v){
+  const L=70, R=930, W=R-L;
+  v = clamp(v, BIG_MIN, BIG_MAX);
+  const a1=BIG_W1*W, a2=BIG_W2*W, a3=BIG_W3*W;
+  if (v <= BIG_Z1B){ const t=(v-BIG_Z1A)/(BIG_Z1B-BIG_Z1A); return L + t*a1; }
+  if (v <= BIG_Z2A){ const t=(v-BIG_Z1B)/(BIG_Z2A-BIG_Z1B); return L + a1 + t*a2; }
+  const t=(v-BIG_Z2A)/(BIG_Z2B-BIG_Z2A);
+  return L + a1 + a2 + t*a3;
+}
+function invMapBig(x){
+  const L=70, R=930, W=R-L;
+  x = clamp(x, L, R);
+  const a1=BIG_W1*W, a2=BIG_W2*W, a3=BIG_W3*W;
+  const x1=L+a1, x2=x1+a2;
+  if (x <= x1){ const t=(x-L)/a1; return BIG_Z1A + t*(BIG_Z1B-BIG_Z1A); }
+  if (x <= x2){ const t=(x-x1)/a2; return BIG_Z1B + t*(BIG_Z2A-BIG_Z1B); }
+  const t=(x-x2)/a3;
+  return BIG_Z2A + t*(BIG_Z2B-BIG_Z2A);
+}
+
+// -------- svg helpers --------
+const NS="http://www.w3.org/2000/svg";
+const mk=(tag)=>document.createElementNS(NS, tag);
+
+function setAttrs(el, attrs){
+  for(const [k,v] of Object.entries(attrs)) el.setAttribute(k, v);
+}
+
+function css(varName){
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+
+function anchorForX(x){
+  if (x < 160) return "start";
+  if (x > 840) return "end";
+  return "middle";
+}
+
+// ======================================================
+// OPTIMIZED SVG: persistent elements, update in place
+// ======================================================
+
+// We keep a pool of SVG elements per SVG, keyed by a logical id string.
+// On first call we create; on subsequent calls we update attributes.
+const svgPool = new WeakMap(); // SVGElement -> Map<string, SVGElement>
+
+function getPool(svg){
+  if(!svgPool.has(svg)) svgPool.set(svg, new Map());
+  return svgPool.get(svg);
+}
+
+function getOrCreate(svg, key, tag){
+  const pool = getPool(svg);
+  if(!pool.has(key)){
+    const el = mk(tag);
+    el.dataset.poolKey = key;
+    pool.set(key, el);
+    svg.appendChild(el);
+  }
+  return pool.get(key);
+}
+
+// Remove pool elements whose keys are not in `keepKeys`
+function prunePool(svg, keepKeys){
+  const pool = getPool(svg);
+  for(const [k, el] of pool){
+    if(!keepKeys.has(k)){
+      el.remove();
+      pool.delete(k);
+    }
+  }
+}
+
+let clScaleBuilt = false;
+let bigScaleBuilt = false;
+
+// Static ticks & lines for CL scale (built once)
+function ensureCLStatic(){
+  if(clScaleBuilt) return;
+  clScaleBuilt = true;
+  ensureArrowDefs(svgCL);
+  const y = 110;
+  // main line
+  const ml = getOrCreate(svgCL,"cl_mainline","line");
+  setAttrs(ml,{x1:70,y1:y,x2:930,y2:y,stroke:"rgba(45,90,39,.35)","stroke-width":7,"stroke-linecap":"round"});
+  // center line
+  const cl = getOrCreate(svgCL,"cl_centerline","line");
+  setAttrs(cl,{x1:mapCL(0),y1:y-66,x2:mapCL(0),y2:y+66,stroke:"rgba(45,90,39,.25)","stroke-width":3,"stroke-linecap":"round"});
+  // ticks
+  let i=0;
+  for(let v=CL_MIN; v<=CL_MAX+1e-9; v+=0.5){
+    const x=mapCL(v);
+    const major=Math.abs(v-Math.round(v))<1e-9;
+    const h=major?30:18;
+    const t = getOrCreate(svgCL,`cl_tick_${i}`,"line");
+    setAttrs(t,{x1:x,y1:y-h/2,x2:x,y2:y+h/2,stroke:"rgba(45,90,39,.30)","stroke-width":2.5,"stroke-linecap":"round"});
+    i++;
+  }
+  // labels
+  for(const [val,label] of [[CL_MIN,String(CL_MIN)],[0,"0"],[CL_MAX,"+"+CL_MAX]]){
+    const tx = getOrCreate(svgCL,`cl_label_${val}`,"text");
+    setAttrs(tx,{x:mapCL(val),y:38,fill:"#5a6b54","font-size":34,"font-weight":700,"text-anchor":"middle","dominant-baseline":"middle"});
+    tx.textContent = label;
+  }
+
+  // Arrow defs for CL (not used in CL scale but keep consistent)
+  // Points: created below as dynamic elements — no statics needed
+}
+
+// Static ticks & lines for Big scale (built once)
+function ensureBigStatic(){
+  if(bigScaleBuilt) return;
+  bigScaleBuilt = true;
+  const y=140;
+  const ml = getOrCreate(svgBig,"big_mainline","line");
+  setAttrs(ml,{x1:70,y1:y,x2:930,y2:y,stroke:"rgba(45,90,39,.35)","stroke-width":7,"stroke-linecap":"round"});
+  const cl = getOrCreate(svgBig,"big_centerline","line");
+  setAttrs(cl,{x1:mapBig(0),y1:y-80,x2:mapBig(0),y2:y+80,stroke:"rgba(45,90,39,.25)","stroke-width":3,"stroke-linecap":"round"});
+
+  let i=0;
+  function tick(v, h){
+    const x=mapBig(v);
+    const t=getOrCreate(svgBig,`big_tick_${i++}`,"line");
+    setAttrs(t,{x1:x,y1:y-h/2,x2:x,y2:y+h/2,stroke:"rgba(45,90,39,.30)","stroke-width":2.5,"stroke-linecap":"round"});
+  }
+  for(let v=-75;v<=-55;v+=2){
+    const major=(v%5===0||v===-75||v===-55);
+    tick(v, major?30:18);
+  }
+  for(let v=-50;v<=50;v+=10){
+    const h=(v===0)?30:16;
+    const x=mapBig(v);
+    const t=getOrCreate(svgBig,`big_tick_${i++}`,"line");
+    setAttrs(t,{x1:x,y1:y-h/2,x2:x,y2:y+h/2,stroke:"rgba(45,90,39,.18)","stroke-width":2,"stroke-linecap":"round"});
+  }
+  for(let v=55;v<=75;v+=2){
+    const major=(v%5===0||v===55||v===75);
+    tick(v, major?30:18);
+  }
+
+  for(const [val,label] of [[-75,"-75"],[0,"0"],[75,"+75"]]){
+    const tx=getOrCreate(svgBig,`big_label_${val}`,"text");
+    setAttrs(tx,{x:mapBig(val),y:38,fill:"#5a6b54","font-size":34,"font-weight":700,"text-anchor":"middle","dominant-baseline":"middle"});
+    tx.textContent=label;
+  }
+
+  // Ensure defs with arrowhead
+  ensureArrowDefs(svgBig);
+}
+
+function ensureArrowDefs(svg){
+  const key="svg_defs";
+  const pool=getPool(svg);
+  if(pool.has(key)) return;
+
+  const defs=mk("defs");
+
+  // Orange arrowheads (double-ended) — used by 90/150 arrows
+const markerEnd=mk("marker");
+setAttrs(markerEnd,{id:"ah",viewBox:"0 0 10 10",markerWidth:5,markerHeight:5,refX:10,refY:5,orient:"auto",markerUnits:"strokeWidth"});
+const pathEnd=mk("path");
+pathEnd.setAttribute("d","M0,0 L10,5 L0,10 Z");
+pathEnd.setAttribute("fill", css("--c")||"#c0392b");
+markerEnd.appendChild(pathEnd);
+defs.appendChild(markerEnd);
+
+const markerStart=mk("marker");
+setAttrs(markerStart,{id:"ahS",viewBox:"0 0 10 10",markerWidth:5,markerHeight:5,refX:0,refY:5,orient:"auto",markerUnits:"strokeWidth"});
+const pathStart=mk("path");
+pathStart.setAttribute("d","M10,0 L0,5 L10,10 Z");
+pathStart.setAttribute("fill", css("--c")||"#c0392b");
+markerStart.appendChild(pathStart);
+defs.appendChild(markerStart);
+
+// Green arrowheads (double-ended) — used by CL REF→VEH arrow
+const markerGEnd=mk("marker");
+setAttrs(markerGEnd,{id:"ahg",viewBox:"0 0 10 10",markerWidth:5,markerHeight:5,refX:10,refY:5,orient:"auto",markerUnits:"strokeWidth"});
+const pathGEnd=mk("path");
+pathGEnd.setAttribute("d","M0,0 L10,5 L0,10 Z");
+pathGEnd.setAttribute("fill", "#2d5a27");
+markerGEnd.appendChild(pathGEnd);
+defs.appendChild(markerGEnd);
+
+const markerGStart=mk("marker");
+setAttrs(markerGStart,{id:"ahgS",viewBox:"0 0 10 10",markerWidth:5,markerHeight:5,refX:0,refY:5,orient:"auto",markerUnits:"strokeWidth"});
+const pathGStart=mk("path");
+pathGStart.setAttribute("d","M10,0 L0,5 L10,10 Z");
+pathGStart.setAttribute("fill", "#2d5a27");
+markerGStart.appendChild(pathGStart);
+defs.appendChild(markerGStart);// Insert defs at front
+  svg.insertBefore(defs, svg.firstChild);
+  pool.set(key, defs);
+}
+
+// Update or create a circle point (draggable)
+function updatePoint(svg, key, x, y, color, draggable){
+  const gKey = "g_"+key;
+  const glowKey = "glow_"+key;
+  const cKey = "circle_"+key;
+
+  let g = getOrCreate(svg, gKey, "g");
+  g.dataset.key = key;
+  g.dataset.draggable = draggable?"1":"0";
+  g.style.cursor = draggable?"grab":"default";
+
+  let glow = getOrCreate(svg, glowKey, "circle");
+  setAttrs(glow,{cx:x,cy:y,r:36,fill:"rgba(45,90,39,.08)"});
+
+  let c = getOrCreate(svg, cKey, "circle");
+  setAttrs(c,{cx:x,cy:y,r:18,fill:color});
+
+  // Ensure correct parent (g) and order
+  if(glow.parentNode !== g) g.appendChild(glow);
+  if(c.parentNode !== g) g.appendChild(c);
+  if(g.parentNode !== svg) svg.appendChild(g);
+}
+
+function updatePillLabel(svg, key, x, y, s, fillText){
+  const el = getOrCreate(svg, key, "text");
+  setAttrs(el,{x,y,fill:fillText,"font-size":28,"font-weight":700,"text-anchor":"middle","dominant-baseline":"middle",
+    "paint-order":"stroke",stroke:"rgba(240,236,226,.85)","stroke-width":8,"stroke-linejoin":"round"});
+  el.textContent = s;
+}
+
+function updateTextAutoAnchor(svg, key, x, y, t, fill, size=28, weight=900){
+  const a = anchorForX(x);
+  const x2 = (a==="start")?x+10:(a==="end"?x-10:x);
+  const el = getOrCreate(svg, key, "text");
+  setAttrs(el,{x:x2,y,fill,"font-size":size,"font-weight":weight,"text-anchor":a,"dominant-baseline":"middle"});
+  el.textContent = t;
+}
+
+function updateMidLabel(svg, key, x, y, t, fill){
+  const el = getOrCreate(svg, key, "text");
+  setAttrs(el,{x,y,fill,"font-size":28,"font-weight":700,"text-anchor":"middle","dominant-baseline":"middle",
+    "paint-order":"stroke",stroke:"rgba(240,236,226,.9)","stroke-width":8,"stroke-linejoin":"round"});
+  el.textContent = t;
+  return el;
+}
+
+function updateArrow(svg, key, x1, x2, y){
+  const el = getOrCreate(svg, key, "line");
+  if(Math.abs(x2-x1)<2){
+    el.style.display="none";
+    return;
+  }
+  el.style.display="";
+  setAttrs(el,{x1,y1:y,x2,y2:y,stroke:css("--c")||"#c0392b","stroke-width":5,"stroke-linecap":"round","marker-end":"url(#ah)",opacity:0.9});
+  el.removeAttribute("marker-start");
+}
+
+// -------- render CL scale --------
+function renderCLScale(pm, fc){
+  ensureCLStatic();
+  const y=110;             // axe
+  const yLblTop  = y-60;  // zone label au-dessus (PM)
+  const yLblBot  = y+60;  // zone label en-dessous (FC)
+  const yArrow   = y+130; // flèche verte — toujours sous les labels
+  const yDelta   = y+100; // label Δ — entre labels et flèche
+
+  const sep=44;
+  const xPM=mapCL(pm), xFC=mapCL(fc);
+  const close=Math.abs(xPM-xFC)<sep;
+  const xpm=close?(xPM-sep/2):xPM;
+  const xfc=close?(xFC+sep/2):xFC;
+
+  updatePoint(svgCL,"clPm", xpm, y, css("--pm"), true);
+  updatePoint(svgCL,"clFc", xfc, y, css("--fc"), true);
+
+  // PM toujours au-dessus, FC toujours en-dessous — jamais de croisement
+  updatePillLabel(svgCL,"lbl_pm", xPM, yLblTop, fmtSigned1(pm), "#c0392b");
+  updatePillLabel(svgCL,"lbl_fc", xFC, yLblBot, fmtSigned1(fc), "#2d5a27");
+
+  // Flèche PM→FC + label Δ dans zone réservée en bas
+  ensureArrowDefs(svgCL);
+  const d = pm - fc;
+  const ln   = getOrCreate(svgCL,"cl_refveh_arrow","line");
+  const lblEl = getOrCreate(svgCL,"cl_refveh_label","text");
+  if(Math.abs(xFC-xPM) < 2){
+    ln.style.display="none";
+    lblEl.style.display="none";
+  } else {
+    ln.style.display="";
+    setAttrs(ln,{x1:xPM,y1:yArrow,x2:xFC,y2:yArrow,stroke:"#2d5a27","stroke-width":5,"stroke-linecap":"round","marker-end":"url(#ahg)",opacity:0.9});
+    ln.removeAttribute("marker-start");
+    const mid=(xPM+xFC)/2;
+    const lbl=updateMidLabel(svgCL,"cl_refveh_label",mid,yDelta,DELTA+" = "+fmtSigned1(d)+" "+MU+"A","#2d5a27");
+    lbl.style.display="";
+  }
+}
+
+// -------- render Big scale --------
+function renderBigScale(n90, c90, n150, c150){
+  ensureBigStatic();
+  const y=140;
+  const x90n=mapBig(n90), x90c=mapBig(c90);
+  const x150n=mapBig(n150), x150c=mapBig(c150);
+
+  const arrowY90  = y - 60;
+  const arrowY150 = y - 30;
+  updateArrow(svgBig,"arrow90",  x90n,  x90c,  arrowY90);
+  updateArrow(svgBig,"arrow150", x150n, x150c, arrowY150);
+
+  const d90  = c90  - n90;
+  const d150 = c150 - n150;
+  const show90  = Math.abs(x90c  - x90n)  >= 2;
+  const show150 = Math.abs(x150c - x150n) >= 2;
+  const mid90  = (x90n  + x90c)  / 2;
+  const mid150 = (x150n + x150c) / 2;
+
+  // Clamp le x du label µA pour qu'il ne sorte pas du viewBox (marge 70px de chaque côté)
+  const clampLbl = (x) => Math.max(120, Math.min(880, x));
+
+  const t90 = updateMidLabel(svgBig, "big_arrow90_val",  clampLbl(mid90),  arrowY90  - 28, fmtSigned1(d90)  + " " + MU + "A", css("--c") || "#c0392b");
+  t90.style.display  = show90  ? "" : "none";
+  const t150 = updateMidLabel(svgBig, "big_arrow150_val", clampLbl(mid150), arrowY150 - 28, fmtSigned1(d150) + " " + MU + "A", css("--c") || "#c0392b");
+  t150.style.display = show150 ? "" : "none";
+
+  updatePoint(svgBig,"v90n", x90n, y, css("--n"), true);
+  updatePoint(svgBig,"v150n",x150n,y, css("--n"), true);
+  updatePoint(svgBig,"v90c", x90c, y, css("--c"), false);
+  updatePoint(svgBig,"v150c",x150c,y, css("--c"), false);
+
+  // Labels norm/corr : si les deux points 90 sont très proches, les séparer verticalement
+  const yN=y+62, yC=y+108;
+  const sep90  = Math.abs(x90c  - x90n);
+  const sep150 = Math.abs(x150c - x150n);
+
+  // Pour 90 : si corrigé très proche du normal, mettre corr plus bas
+  const yC90  = sep90  < 60 ? y+118 : yC;
+  const yC150 = sep150 < 60 ? y+118 : yC;
+
+  updateTextAutoAnchor(svgBig,"lbl_90n", x90n, yN, fmt1(n90),  "#4a5568");
+  updateTextAutoAnchor(svgBig,"lbl_90c", x90c, yC90, fmt1(c90),  "#c0392b");
+  updateTextAutoAnchor(svgBig,"lbl_150n",x150n,yN, fmt1(n150), "#4a5568");
+  updateTextAutoAnchor(svgBig,"lbl_150c",x150c,yC150, fmt1(c150), "#c0392b");
+}
+
+
+
+// -------- core update --------
+/* ========= COEUR: UPDATE() =========
+   - Lit les champs
+   - Calcule Δ et correction
+   - Met a jour sorties + phrases
+   - Re-rend les SVG
+*/
+function update(){
+  const n90=parseNum(v90n.value);
+  const n150=parseNum(v150n.value);
+  const pm=parseNum(clPm.value);
+  const fc=parseNum(clFc.value);
+
+  if(![n90,n150,pm,fc].every(Number.isFinite)){
+    v90c.value=""; v150c.value="";
+    outDelta.textContent="--";
+    sentence.textContent="Entree invalide. Exemple: -70.0, 70.0, -3.0, 2.0";
+    eqs.textContent="";
+    return;
+  }
+
+  const delta = pm - fc;
+  const corr  = -delta;
+  const c90   = n90  - delta;
+  const c150  = n150 - delta;
+
+  formatIfNotEditing(v90n,  n90);
+  formatIfNotEditing(v150n, n150);
+  formatIfNotEditing(clPm,  pm);
+  formatIfNotEditing(clFc,  fc);
+
+  v90c.value  = fmt1(c90);
+  v150c.value = fmt1(c150);
+
+  outDelta.textContent = fmt1(delta) + " " + MU + "A";
+
+  if(corr > 0)      sentence.textContent = "Les valeurs corrigées seront ramenées vers la droite (+" + fmt1(corr) + " " + MU + "A)";
+  else if(corr < 0) sentence.textContent = "Les valeurs corrigées seront ramenées vers la gauche (" + fmt1(corr) + " " + MU + "A)";
+  else              sentence.textContent = "Les valeurs corrigées ne nécessitent aucun ajustement (0.0 " + MU + "A)";
+
+  eqs.textContent =
+    DELTA + " = " + fmt1(pm) + " - (" + fmt1(fc) + ") = " + fmt1(delta) + " " + MU + "A\n" +
+    "90Hz corrigé = " + fmt1(n90)  + " - (" + fmt1(delta) + ") = " + fmt1(c90)  + "\n" +
+    "150Hz corrigé = " + fmt1(n150) + " - (" + fmt1(delta) + ") = " + fmt1(c150);
+
+  renderCLScale(clamp(pm,CL_MIN,CL_MAX), clamp(fc,CL_MIN,CL_MAX));
+  renderBigScale(n90,c90,n150,c150);
+}
+
+// -------- dragging --------
+// touch-action: lock to none on SVG only while dragging to prevent scroll conflict
+const state={drag:{active:false,key:null,svg:null,inv:null,min:null,max:null,snap:null}};
+
+function svgPointFromEvent(e){
+  const g = e.target.closest && e.target.closest('g[data-draggable="1"]');
+  return g || null;
+}
+function getSVGCoords(svg, cx, cy){
+  const pt=svg.createSVGPoint();
+  pt.x=cx; pt.y=cy;
+  const p=pt.matrixTransform(svg.getScreenCTM().inverse());
+  return {x:p.x,y:p.y};
+}
+function startDrag(svg, key, inv, min, max, snap){
+  state.drag={active:true,key,svg,inv,min,max,snap};
+  svg.style.touchAction="none"; // lock during drag
+}
+function stopDrag(svg){
+  state.drag.active=false;
+  if(svg) svg.style.touchAction="pan-y"; // restore scroll
+}
+function applyDragX(x){
+  if(!state.drag.active) return;
+  let v=state.drag.inv(x);
+  v=clamp(v,state.drag.min,state.drag.max);
+  if(state.drag.snap){ const s=state.drag.snap; v=Math.round(v/s)*s; }
+  if     (state.drag.key==="clPm")  clPm.value  = fmt1(v);
+  else if(state.drag.key==="clFc")  clFc.value  = fmt1(v);
+  else if(state.drag.key==="v90n")  v90n.value  = fmt1(v);
+  else if(state.drag.key==="v150n") v150n.value = fmt1(v);
+  update();
+}
+
+// Bind dragging once (not inside update)
+function bindDragging(){
+  [svgCL, svgBig].forEach(svg=>{
+    svg.addEventListener("pointerdown",(e)=>{
+      const g=svgPointFromEvent(e);
+      if(!g) return;
+      const key=g.dataset.key;
+      if(!["clPm","clFc","v90n","v150n"].includes(key)) return;
+      svg.setPointerCapture(e.pointerId);
+      const p=getSVGCoords(svg,e.clientX,e.clientY);
+      if(svg===svgCL) startDrag(svg,key,invMapCL,CL_MIN,CL_MAX,0.1);
+      else            startDrag(svg,key,invMapBig,-75,75,1);
+      applyDragX(p.x);
+    });
+    svg.addEventListener("pointermove",(e)=>{
+      if(!state.drag.active||state.drag.svg!==svg) return;
+      applyDragX(getSVGCoords(svg,e.clientX,e.clientY).x);
+    });
+    svg.addEventListener("pointerup",()=>{ if(state.drag.svg===svg) stopDrag(svg); });
+    svg.addEventListener("pointercancel",()=>{ if(state.drag.svg===svg) stopDrag(svg); });
+  });
+}
+
+// -------- importer --------
+const modalBack=$("modalBack");
+const importText=$("importText");
+function openModal(){ modalBack.style.display="flex"; importText.focus(); }
+function closeModal(){ modalBack.style.display="none"; }
+
+// Focus trap for modal accessibility
+modalBack.addEventListener("keydown",(e)=>{
+  if(e.key==="Escape") closeModal();
+  if(e.key!=="Tab") return;
+  const focusable = [...modalBack.querySelectorAll('button, textarea, [tabindex]:not([tabindex="-1"])')];
+  const first=focusable[0], last=focusable[focusable.length-1];
+  if(e.shiftKey){ if(document.activeElement===first){ e.preventDefault(); last.focus(); } }
+  else { if(document.activeElement===last){ e.preventDefault(); first.focus(); } }
+});
+
+function applyImportText(txt){
+  const s0=String(txt||"");
+  const s=s0.replace(/[–—]/g,"-");
+  const get=(re)=>{ const m=s.match(re); return m?parseNum(m[1]):NaN; };
+
+  let n90  = get(/\b90\b\s*[:=]\s*([+\-]?\s*\d+(?:[.,]\d+)?)/i);
+  let n150 = get(/\b150\b\s*[:=]\s*([+\-]?\s*\d+(?:[.,]\d+)?)/i);
+  let pm   = get(/\b(?:pm|cl_pm|clpm)\b\s*[:=]\s*([+\-]?\s*\d+(?:[.,]\d+)?)/i);
+  let fc   = get(/\b(?:fc|cl_fc|clfc)\b\s*[:=]\s*([+\-]?\s*\d+(?:[.,]\d+)?)/i);
+
+  if(!Number.isFinite(n90))  n90  = get(/Normal\s*90\s*Hz.*?:\s*([+\-]?\s*\d+(?:[.,]\d+)?)/i);
+  if(!Number.isFinite(n150)) n150 = get(/Normal\s*150\s*Hz.*?:\s*([+\-]?\s*\d+(?:[.,]\d+)?)/i);
+  if(!Number.isFinite(pm))   pm   = get(/Normal\s*CL.*?:\s*([+\-]?\s*\d+(?:[.,]\d+)?)/i);
+
+  let dcl = get(/(?:\u0394CL|DeltaCL|DCL)\s*=\s*[\s\S]*?=\s*([+\-]?\s*\d+(?:[.,]\d+)?)/i);
+
+  if(!Number.isFinite(dcl)){
+    const c90=get(/Corrected\s*90\s*Hz.*?:\s*([+\-]?\s*\d+(?:[.,]\d+)?)/i);
+    if(Number.isFinite(n90)&&Number.isFinite(c90)) dcl=n90-c90;
+  }
+  if(!Number.isFinite(dcl)){
+    const c150=get(/Corrected\s*150\s*Hz.*?:\s*([+\-]?\s*\d+(?:[.,]\d+)?)/i);
+    if(Number.isFinite(n150)&&Number.isFinite(c150)) dcl=n150-c150;
+  }
+  if(!Number.isFinite(fc)&&Number.isFinite(pm)&&Number.isFinite(dcl)) fc=pm-dcl;
+
+  if(Number.isFinite(n90))  v90n.value  = fmt1(n90);
+  if(Number.isFinite(n150)) v150n.value = fmt1(n150);
+  if(Number.isFinite(pm))   clPm.value  = fmt1(pm);
+  if(Number.isFinite(fc))   clFc.value  = fmt1(fc);
+
+  update();
+}
+
+// -------- UI events --------
+[v90n,v150n,clPm,clFc].forEach(el=>{
+  el.addEventListener("input", update);
+  el.addEventListener("blur", ()=>{ cleanField(el); update(); });
+});
+
+$("btnImporter").addEventListener("click", openModal);
+$("closeModal").addEventListener("click", closeModal);
+modalBack.addEventListener("click",(e)=>{ if(e.target===modalBack) closeModal(); });
+$("applyImport").addEventListener("click",()=>{ applyImportText(importText.value); closeModal(); });
+
+$("fillExample").addEventListener("click",()=>{ importText.value=
+`Info
+-----------------------------------------
+Date/Time (Z): 2026-02-19 01:21Z
+
+Runway readings (PIR)
+-----------------------------------------
+Corrected 90 Hz: -71.6 µA
+Normal 90 Hz DDM: -68.9 µA
+Normal CL DDM: 0.5 µA
+Normal 150 Hz DDM: 67.5 µA
+Corrected 150 Hz: 64.8 µA
+
+Formulas
+-----------------------------------------
+ΔCL = CL DDM now - CL DDM (FC) = 2.7 µA`;
+});
+
+// Init: bind drag once, then first render
+bindDragging();
+update();
+
+// ── PWA: enregistrement du Service Worker ──────────────────
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js")
+      .then((reg) => console.log("[SW] Enregistré :", reg.scope))
+      .catch((err) => console.warn("[SW] Échec :", err));
+  });
+}
+// ───────────────────────────────────────────────────────────
+</script>
+</body>
+</html>
+
+
+<!-- ===================================================================
+INDEX — Lecture de piste (ILS) — Navigation rapide (CTRL+F)
+===================================================================
+
+SECTIONS PRINCIPALES (dans la version actuelle)
+- CSS : cherche  "SECTION CSS"            (≈ ligne 26)
+- HTML: cherche  "SECTION HTML (UI)"      (≈ ligne 319)
+- JS  : cherche  "SECTION JS"             (≈ ligne 466)
+
+-------------------------------------------------------------------
+[00] RÉSUMÉ / FORMULES
+- Δ = CL_PM - CL_FC
+- Correction appliquée aux 90/150 = -Δ
+- 90 corrigé  = 90 normal  - Δ
+- 150 corrigé = 150 normal - Δ
+- Direction (texte) : basé sur la correction (-Δ) => "vers la droite/gauche"
+
+-------------------------------------------------------------------
+[01] CSS / THEME / RESPONSIVE
+Cherche:
+- ":root"  (couleurs + variables globales)
+- ".wrap" ".card" ".panel" (layout)
+- "input" "button" (tailles mobile)
+- ".vizCard" "#svgCL" "#svgBig" (cartes visuelles)
+
+À modifier sans risque:
+- Couleurs points: --pm (orange), --fc (bleu), --n (normal), --c (corrigé)
+- Rayons/ombre: --r + box-shadow
+
+-------------------------------------------------------------------
+[02] HTML / UI (CHAMPS + SORTIES + SVG)
+Cherche ces IDs:
+Entrées:
+- #v90n    (90 Hz normal)
+- #v150n   (150 Hz normal)
+- #clPm    (CL_PM)
+- #clFc    (CL_FC)
+
+Sorties:
+- #outDelta   (Δ affiché)
+- #v90c       (90 corrigé)
+- #v150c      (150 corrigé)
+- #sentence   (phrase directionnelle)
+- #eqs        (détails calculs)
+
+Visuels (SVG):
+- #svgCL   (Repère CL)
+- #svgBig  (Repère 90/150)
+
+Modal Importer:
+- #modalBack
+- #btnImporter
+- #importText
+- #applyImport
+- #fillExample
+- #closeModal
+
+-------------------------------------------------------------------
+[03] JS / LOGIQUE (LES BLOCS IMPORTANTs)
+Cherche (fonctions / constantes):
+A) Parsing / format (≈ ligne 495)
+- parseNum()
+- fmt1(), fmtSigned1()
+- cleanField(), formatIfNotEditing()
+
+B) Constantes d’échelles (≈ ligne 523)
+- CL_MIN / CL_MAX                     (zoom repère CL)
+- BIG_MIN / BIG_MAX                   (échelle globale 90/150)
+- BIG_Z1A..BIG_Z2B + BIG_W1..BIG_W3   (loupe: bords zoomés, centre comprimé)
+
+C) Mapping valeur -> X et inverse (≈ ligne 525 / 543)
+- mapCL() / invMapCL()
+- mapBig() / invMapBig()
+
+D) Rendu SVG (repères + points + labels + flèches)
+- renderCLScale()     (≈ ligne 780)  => repère CL + REF→VEH + Δ au-dessus/au-dessous
+- renderBigScale()    (≈ ligne 820)  => repère 90/150 + flèches + valeurs au-dessus
+- updateArrow()       (≈ ligne 769)  => objet “flèche” (ligne + pointe + label)
+
+E) Calcul central (≈ ligne 866)
+- update()            => recalc tout + met à jour UI + refresh SVG
+
+F) Drag & drop (≈ ligne 943)
+- bindDragging()      => touch/mouse
+(CTRL+F: "draggable" si tu veux localiser les éléments drag)
+
+G) Importer (≈ ligne 981)
+- applyImportText()   => parse le texte collé et alimente les champs
+- openModal()/closeModal()
+
+-------------------------------------------------------------------
+POINTS “SAFE” À MODIFIER (sans casser l’app)
+- Zoom repère CL : CL_MIN / CL_MAX
+- Loupe 90/150   : BIG_Z1A..BIG_Z2B et BIG_W1..BIG_W3
+- Styles UI       : variables :root (couleurs, radius, etc.)
+
+POINTS À ÉVITER SI TU VEUX PAS TOUT DÉCALER
+- IDs HTML (v90n, v150n, clPm, clFc, svgCL, svgBig, etc.)
+- La logique de update() (Δ / correction) sans revalider les phrases gauche/droite
+
+=================================================================== -->
